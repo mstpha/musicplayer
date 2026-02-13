@@ -1,10 +1,12 @@
 package com.example.musicplayer
 
+import android.content.ComponentName
 import android.content.Context
-import android.media.MediaPlayer
+import android.content.Intent
+import android.content.ServiceConnection
+import android.os.IBinder
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Stop
@@ -14,7 +16,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
-import java.io.File
 
 data class MusicFile(
     val name: String,
@@ -26,12 +27,36 @@ data class MusicFile(
 fun MusicPlayerApp() {
     val context = LocalContext.current
     val musicFiles = remember { getMusicFiles(context) }
+
+    var musicService by remember { mutableStateOf<MusicService?>(null) }
     var currentPlayingIndex by remember { mutableStateOf<Int?>(null) }
-    var mediaPlayer by remember { mutableStateOf<MediaPlayer?>(null) }
+    var isPlaying by remember { mutableStateOf(false) }
+
+    val serviceConnection = remember {
+        object : ServiceConnection {
+            override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
+                val binder = service as MusicService.MusicBinder
+                musicService = binder.getService()
+
+                // Register listener for state changes
+                musicService?.registerStateListener { _, playing ->
+                    isPlaying = playing
+                }
+            }
+
+            override fun onServiceDisconnected(name: ComponentName?) {
+                musicService = null
+            }
+        }
+    }
 
     DisposableEffect(Unit) {
+        val intent = Intent(context, MusicService::class.java)
+        context.bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE)
+
         onDispose {
-            mediaPlayer?.release()
+            musicService?.unregisterStateListener { _, _ -> }
+            context.unbindService(serviceConnection)
         }
     }
 
@@ -56,37 +81,16 @@ fun MusicPlayerApp() {
             items(musicFiles.size) { index ->
                 MusicItem(
                     musicFile = musicFiles[index],
-                    isPlaying = currentPlayingIndex == index,
+                    isPlaying = currentPlayingIndex == index && isPlaying,
                     onPlayStop = {
                         if (currentPlayingIndex == index) {
                             // Stop current track
-                            mediaPlayer?.stop()
-                            mediaPlayer?.release()
-                            mediaPlayer = null
+                            musicService?.stopPlayback()
                             currentPlayingIndex = null
                         } else {
-                            // Stop previous track if any
-                            mediaPlayer?.stop()
-                            mediaPlayer?.release()
-
                             // Play new track
-                            try {
-                                val afd = context.assets.openFd(musicFiles[index].path)
-                                mediaPlayer = MediaPlayer().apply {
-                                    setDataSource(afd.fileDescriptor, afd.startOffset, afd.length)
-                                    afd.close()
-                                    prepare()
-                                    start()
-                                    setOnCompletionListener {
-                                        currentPlayingIndex = null
-                                    }
-                                }
-                                currentPlayingIndex = index
-                            } catch (e: Exception) {
-                                e.printStackTrace()
-                                mediaPlayer = null
-                                currentPlayingIndex = null
-                            }
+                            musicService?.playMusic(musicFiles[index], index)
+                            currentPlayingIndex = index
                         }
                     }
                 )
@@ -159,5 +163,3 @@ fun getMusicFiles(context: Context): List<MusicFile> {
         emptyList()
     }
 }
-
-

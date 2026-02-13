@@ -57,8 +57,15 @@ dependencies {
     implementation(libs.androidx.compose.ui.tooling.preview)
     implementation(libs.androidx.compose.material3)
 
+
     // Material Icons Extended (for play/stop icons)
     implementation("androidx.compose.material:material-icons-extended:1.6.1")
+
+    // Media and MediaSession support for background playback
+    implementation("androidx.media:media:1.7.0")
+
+    // Support library for notifications and media compat
+    implementation("androidx.core:core:1.12.0")
 
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
