@@ -223,6 +223,8 @@ class MusicService : Service() {
 
     fun getCurrentIndex(): Int? = currentIndex
 
+    fun isCurrentlyPlaying(): Boolean = isPlaying
+
     fun registerStateListener(listener: (Int?, Boolean) -> Unit) {
         stateListeners.add(listener)
     }

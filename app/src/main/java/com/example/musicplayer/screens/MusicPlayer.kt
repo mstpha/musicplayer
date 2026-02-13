@@ -38,8 +38,9 @@ fun MusicPlayerApp() {
                 val binder = service as MusicService.MusicBinder
                 musicService = binder.getService()
 
-                // Get initial state
+                // Sync initial state from service
                 currentPlayingIndex = musicService?.getCurrentIndex()
+                isPlaying = musicService?.isCurrentlyPlaying() ?: false
 
                 // Register listener for state changes
                 musicService?.registerStateListener { index, playing ->
