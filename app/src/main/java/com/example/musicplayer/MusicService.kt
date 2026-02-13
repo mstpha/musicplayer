@@ -22,6 +22,8 @@ class MusicService : Service() {
     private val binder = MusicBinder()
 
     private var currentMusicFile: MusicFile? = null
+    private var currentIndex: Int? = null
+    private var playlist: List<MusicFile> = emptyList()
     private var isPlaying = false
 
     // Callbacks to notify UI of state changes
@@ -33,6 +35,8 @@ class MusicService : Service() {
         const val ACTION_PLAY = "com.example.musicplayer.PLAY"
         const val ACTION_PAUSE = "com.example.musicplayer.PAUSE"
         const val ACTION_STOP = "com.example.musicplayer.STOP"
+        const val ACTION_NEXT = "com.example.musicplayer.NEXT"
+        const val ACTION_PREVIOUS = "com.example.musicplayer.PREVIOUS"
     }
 
     inner class MusicBinder : Binder() {
@@ -72,6 +76,12 @@ class MusicService : Service() {
             ACTION_STOP -> {
                 stopPlayback()
             }
+            ACTION_NEXT -> {
+                playNext()
+            }
+            ACTION_PREVIOUS -> {
+                playPrevious()
+            }
         }
 
         return START_STICKY
@@ -102,6 +112,18 @@ class MusicService : Service() {
                         action = ACTION_STOP
                     })
                 }
+
+                override fun onSkipToNext() {
+                    startService(Intent(this@MusicService, MusicService::class.java).apply {
+                        action = ACTION_NEXT
+                    })
+                }
+
+                override fun onSkipToPrevious() {
+                    startService(Intent(this@MusicService, MusicService::class.java).apply {
+                        action = ACTION_PREVIOUS
+                    })
+                }
             })
 
             isActive = true
@@ -124,10 +146,14 @@ class MusicService : Service() {
         }
     }
 
-    fun playMusic(musicFile: MusicFile, index: Int) {
+    fun playMusic(musicFile: MusicFile, index: Int, fullPlaylist: List<MusicFile>) {
         // Stop current playback
         mediaPlayer?.stop()
         mediaPlayer?.release()
+
+        // Store playlist info
+        playlist = fullPlaylist
+        currentIndex = index
 
         try {
             val afd = assets.openFd(musicFile.path)
@@ -137,7 +163,8 @@ class MusicService : Service() {
                 prepare()
                 start()
                 setOnCompletionListener {
-                    stopPlayback()
+                    // Auto-advance to next song
+                    playNext()
                 }
             }
 
@@ -169,6 +196,7 @@ class MusicService : Service() {
         mediaPlayer?.release()
         mediaPlayer = null
         currentMusicFile = null
+        currentIndex = null
         isPlaying = false
 
         updatePlaybackState(PlaybackStateCompat.STATE_STOPPED)
@@ -177,22 +205,23 @@ class MusicService : Service() {
         notifyListeners()
     }
 
-    fun togglePlayPause() {
-        if (isPlaying) {
-            startService(Intent(this, MusicService::class.java).apply {
-                action = ACTION_PAUSE
-            })
-        } else if (currentMusicFile != null) {
-            startService(Intent(this, MusicService::class.java).apply {
-                action = ACTION_PLAY
-            })
+    fun playNext() {
+        val index = currentIndex
+        if (index != null && playlist.isNotEmpty()) {
+            val nextIndex = (index + 1) % playlist.size
+            playMusic(playlist[nextIndex], nextIndex, playlist)
         }
     }
 
-    fun isCurrentlyPlaying(index: Int): Boolean {
-        // You'll need to track the index separately or compare music files
-        return isPlaying
+    fun playPrevious() {
+        val index = currentIndex
+        if (index != null && playlist.isNotEmpty()) {
+            val previousIndex = if (index - 1 < 0) playlist.size - 1 else index - 1
+            playMusic(playlist[previousIndex], previousIndex, playlist)
+        }
     }
+
+    fun getCurrentIndex(): Int? = currentIndex
 
     fun registerStateListener(listener: (Int?, Boolean) -> Unit) {
         stateListeners.add(listener)
@@ -203,8 +232,7 @@ class MusicService : Service() {
     }
 
     private fun notifyListeners() {
-        // You'll need to pass the current index here
-        stateListeners.forEach { it(null, isPlaying) }
+        stateListeners.forEach { it(currentIndex, isPlaying) }
     }
 
     private fun updatePlaybackState(state: Int) {
@@ -214,7 +242,9 @@ class MusicService : Service() {
                 .setActions(
                     PlaybackStateCompat.ACTION_PLAY or
                             PlaybackStateCompat.ACTION_PAUSE or
-                            PlaybackStateCompat.ACTION_STOP
+                            PlaybackStateCompat.ACTION_STOP or
+                            PlaybackStateCompat.ACTION_SKIP_TO_NEXT or
+                            PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS
                 )
                 .build()
         )
@@ -246,6 +276,24 @@ class MusicService : Service() {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
 
+        val previousIntent = PendingIntent.getService(
+            this,
+            2,
+            Intent(this, MusicService::class.java).apply {
+                action = ACTION_PREVIOUS
+            },
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+
+        val nextIntent = PendingIntent.getService(
+            this,
+            3,
+            Intent(this, MusicService::class.java).apply {
+                action = ACTION_NEXT
+            },
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle(currentMusicFile?.name ?: "Music Player")
             .setContentText(if (isPlaying) "Playing" else "Paused")
@@ -254,9 +302,19 @@ class MusicService : Service() {
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setOnlyAlertOnce(true)
             .addAction(
+                android.R.drawable.ic_media_previous,
+                "Previous",
+                previousIntent
+            )
+            .addAction(
                 if (isPlaying) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play,
                 if (isPlaying) "Pause" else "Play",
                 playPauseIntent
+            )
+            .addAction(
+                android.R.drawable.ic_media_next,
+                "Next",
+                nextIntent
             )
             .addAction(
                 android.R.drawable.ic_delete,
@@ -266,7 +324,7 @@ class MusicService : Service() {
             .setStyle(
                 androidx.media.app.NotificationCompat.MediaStyle()
                     .setMediaSession(mediaSession.sessionToken)
-                    .setShowActionsInCompactView(0, 1)
+                    .setShowActionsInCompactView(0, 1, 2)
             )
             .build()
     }

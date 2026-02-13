@@ -38,8 +38,12 @@ fun MusicPlayerApp() {
                 val binder = service as MusicService.MusicBinder
                 musicService = binder.getService()
 
+                // Get initial state
+                currentPlayingIndex = musicService?.getCurrentIndex()
+
                 // Register listener for state changes
-                musicService?.registerStateListener { _, playing ->
+                musicService?.registerStateListener { index, playing ->
+                    currentPlayingIndex = index
                     isPlaying = playing
                 }
             }
@@ -86,11 +90,9 @@ fun MusicPlayerApp() {
                         if (currentPlayingIndex == index) {
                             // Stop current track
                             musicService?.stopPlayback()
-                            currentPlayingIndex = null
                         } else {
-                            // Play new track
-                            musicService?.playMusic(musicFiles[index], index)
-                            currentPlayingIndex = index
+                            // Play new track - pass full playlist
+                            musicService?.playMusic(musicFiles[index], index, musicFiles)
                         }
                     }
                 )
